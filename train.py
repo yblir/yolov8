@@ -4,7 +4,8 @@ warnings.filterwarnings('ignore')
 from ultralytics import YOLO
 
 if __name__ == '__main__':
-    model = YOLO('ultralytics/cfg/models/v8_modify/yolov8s_lyb.yaml')
+    # model = YOLO('ultralytics/cfg/models/v8_modify/yolov8s_lyb.yaml')
+    model=YOLO("ultralytics/cfg/models/v8_modify/yolov8s-C2f-DLKA.yaml")
     model.load('weights/yolov8s.pt')  # 是否加载预训练权重,科研不建议大家加载否则很难提升精度
 
     model.train(data='ultralytics/cfg/datasets/coco128.yaml',
@@ -13,9 +14,9 @@ if __name__ == '__main__':
                 # scale='l',
                 cache=False,
                 imgsz=640,
-                epochs=2,
+                epochs=20,
                 single_cls=False,  # 是否是单类别检测
-                batch=4,
+                batch=8,
                 close_mosaic=10,
                 workers=5,
                 device='0',
