@@ -85,3 +85,6 @@ from .ResNet import *
 from .FasterBlock import *
 from .RFAConvHead import *
 from .RepConvHead import *
+
+# ======================================
+from .ASCPA import *

@@ -11,7 +11,12 @@ import torch.nn as nn
 # 魔改卷积快,像conv+bn+rule
 add_conv = [ODConv2dYolo, ]
 # 对C1,C3,C2f这样的模块封装,主要添加在模块重复区域
-add_block = [C2f_ODConv, CSPStage, C2f_DLKA]
+add_block = [C2f_ODConv, CSPStage, C2f_DLKA, ASCPA,
+             ]
+# 以下,都来自gold-yolo
+from .Addmodules.GoldYOLO import Low_FAM, Low_IFM, Split, SimConv, Low_LAF, Inject, RepBlock, High_FAM, High_IFM, \
+    High_LAF
+
 # 最后的检测头魔改
 add_detect = [Detect_AFPN3, Detect_FASFF, RepHead]
 # ----------------------------------------------------------------------------------------------------------------------
@@ -134,7 +139,10 @@ class BaseModel(nn.Module):
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
                 self._profile_one_layer(m, x, dt)
-            x = m(x)  # run
+
+            # todo gold-yolo, 这里要修改
+            x = m(*x) if m.input_nums > 1 else m(x)
+
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
@@ -847,6 +855,8 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}")
     ch = [ch]
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+    backbone = False
+    goldyolo = False
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
         m = getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]  # get module
         for j, a in enumerate(args):
@@ -882,8 +892,14 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             C3x,
             RepC3,
             *add_conv,
-            *add_block
+            *add_block,
+            # gold yolo ---------------------
+            SimConv,
+            # 专为goldyolo设计?
+            nn.Conv2d,
         }:
+            if m == SimConv:
+                print("111")
             c1, c2 = ch[f], args[0]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
@@ -912,6 +928,40 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+        # --------------------------------------------------------------------------------------------------------------
+        # 魔改的,GOLD-yolo, 需要特殊处理的模块,自行处理逻辑
+        elif m in (Low_FAM, High_FAM, High_LAF):
+            c2 = sum(ch[x] for x in f)
+        elif m is Low_IFM:
+            c1, c2 = ch[f], args[2]
+            if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
+                c2 = make_divisible(min(c2, max_channels) * width, 8)
+            args = [c1, *args[:-1], c2]
+        elif m is Low_LAF:
+            c1, c2 = ch[f[1]], args[0]
+            if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
+                c2 = make_divisible(min(c2, max_channels) * width, 8)
+            args = [c1, c2, *args[1:]]
+        elif m is Inject:
+            global_index = args[1]
+            c1, c2 = ch[f[1]][global_index], args[0]
+            if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
+                c2 = make_divisible(min(c2, max_channels) * width, 8)
+            args = [c1, c2, global_index]
+        elif m is RepBlock:
+            c1, c2 = ch[f], args[0]
+            if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
+                c2 = make_divisible(min(c2, max_channels) * width, 8)
+            nums_repeat = max(round(args[1] * depth), 1) if args[1] > 1 else args[1]  # depth gain
+            args = [c1, c2, nums_repeat]
+        elif m is Split:
+            goldyolo = True
+            c2 = []
+            for arg in args:
+                if arg != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
+                    c2.append(make_divisible(min(arg, max_channels) * width, 8))
+            args = [c2]
+        # --------------------------------------------------------------------------------------------------------------
         # todo 检测头魔改添加在这里,不能在上面主干模块中
         elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn, *add_detect}:
             args.append([ch[x] for x in f])
@@ -928,17 +978,36 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         else:
             c2 = ch[f]
 
-        m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
-        t = str(m)[8:-2].replace("__main__.", "")  # module type
+        # gold要修改地方有点多1
+        if isinstance(c2, list) and not goldyolo:
+            m_ = m
+            m_.backbone = True
+        else:
+            m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+            t = str(m)[8:-2].replace('__main__.', '')  # module type
+
         m.np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
+
+        # gold要修改地方有点多1
+        if m in [Inject, High_LAF]:
+            # input nums
+            m_.input_nums = len(f)
+        else:
+            m_.input_nums = 1
+
         if verbose:
             LOGGER.info(f"{i:>3}{str(f):>20}{n_:>3}{m.np:10.0f}  {t:<45}{str(args):<30}")  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
         if i == 0:
             ch = []
-        ch.append(c2)
+        if isinstance(c2, list) and not goldyolo:
+            ch.extend(c2)
+            if len(c2) != 5:
+                ch.insert(0, 0)
+        else:
+            ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
 
