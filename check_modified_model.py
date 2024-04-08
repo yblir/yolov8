@@ -49,6 +49,7 @@ if __name__ == '__main__':
     # 检测修改配置文件yaml后生成的的model是否能正常运行
     # yaml_path = 'ultralytics/cfg/models/v8_modify/yolov8-AKConv.yaml'
     # yaml_path= 'ultralytics/cfg/models/v8_modify/yolov8s_lyb.yaml'
-    yaml_path="ultralytics/cfg/models/v8_modify/yolov8s-ODConv-Gold-AFPN.yaml"
+    # yaml_path="ultralytics/cfg/models/v8_modify/yolov8s-ODConv-Gold-AFPN.yaml"
     # yaml_path=r"E:\GitHub\yolov8\ultralytics\cfg\models\v8_modify\yolov8s.yaml"
+    yaml_path='ultralytics/cfg/models/v8_modify/yolov8s_4fpn.yaml'
     model_forward(yaml_path)

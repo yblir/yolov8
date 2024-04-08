@@ -870,11 +870,11 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 with contextlib.suppress(ValueError):
                     args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
         # todo
-        if m in (
-                Low_FAM, Low_IFM, Split, SimConv, Low_LAF, Inject, RepBlock, High_FAM, High_IFM, High_LAF, nn.Conv2d):
-            width = 0.25
-        else:
-            width = 0.50
+        # if m in (
+        #         Low_FAM, Low_IFM, Split, SimConv, Low_LAF, Inject, RepBlock, High_FAM, High_IFM, High_LAF, nn.Conv2d):
+        #     width = 0.25
+        # else:
+        #     width = 0.50
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
         if m in {
             Classify,

@@ -5,7 +5,8 @@ from ultralytics import YOLO
 
 if __name__ == '__main__':
     # model = YOLO('ultralytics/cfg/models/v8_modify/yolov8s_lyb.yaml')
-    model=YOLO(r"E:\GitHub\yolov8\ultralytics\cfg\models\v8_modify\yolov8s-ODConv-Gold-AFPN.yaml")
+    # model=YOLO(r"E:\GitHub\yolov8\ultralytics\cfg\models\v8_modify\yolov8s-ODConv-Gold-AFPN.yaml")
+    model=YOLO(r'ultralytics/cfg/models/v8_modify/yolov8s_4fpn.yaml')
     # model = YOLO(r"E:\GitHub\yolov8\ultralytics\cfg\models\v8_modify\yolov8s.yaml")
     model.load('weights/yolov8s.pt')  # 是否加载预训练权重,科研不建议大家加载否则很难提升精度
 
