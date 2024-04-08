@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 __all__ = ['ASCPA']
 
+
 class ASCPA(nn.Module):
     def __init__(self, c1, inter_channels_rate=8, add=True):
         """

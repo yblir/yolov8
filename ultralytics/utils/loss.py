@@ -330,8 +330,27 @@ class BboxLoss(nn.Module):
     def forward(self, pred_dist, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask):
         """IoU loss."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
-        iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
-        loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
+        # todo 原来的
+        # iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
+        # loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
+
+        # wdloss 后来的
+        iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, ShapeIoU=True)
+        b1_x1, b1_y1, b1_x2, b1_y2 = pred_bboxes[fg_mask].chunk(4, -1)
+        b2_x1, b2_y1, b2_x2, b2_y2 = target_bboxes[fg_mask].chunk(4, -1)
+        BX_L2Norm = torch.pow((b1_x1 - b2_x1), 2)
+        BY_L2Norm = torch.pow((b1_y1 - b2_y1), 2)
+        p1 = BX_L2Norm + BY_L2Norm
+        w_FroNorm = torch.pow((b1_x2 - b2_x2) / 2, 2)
+        h_FroNorm = torch.pow((b1_y2 - b2_y2) / 2, 2)
+        p2 = w_FroNorm + h_FroNorm
+        wasserstein = torch.exp(-torch.pow((p1 + p2), 1 / 2) / 2.5)
+        wdloss = True  # 设置为 True 使用Normalized Gaussian Wasserstein Distance 设置 False 则用v8默认的
+        if wdloss:
+            loss_iou = (0.7 * ((1.0 - iou) * weight).sum() + 0.3 * (
+                        (1.0 - wasserstein) * weight).sum()) / target_scores_sum
+        else:
+            loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
 
         # DFL loss
         if self.use_dfl:
@@ -413,13 +432,12 @@ class v8DetectionLoss:
         m = model.model[-1]  # Detect() module
         # 分类损失函数
         # --------------------------------------------------------------------------------------------------------------
-        # self.cls_loss_func = nn.BCEWithLogitsLoss(reduction="none")
-
         "下面的代码注释掉就是正常的损失函数，如果不注释使用的就是使用对应的损失失函数"
+        # self.cls_loss_func = nn.BCEWithLogitsLoss(reduction="none")
         # self.cls_loss_func = Focal_Loss(nn.BCEWithLogitsLoss(reduction='none')) # Focal
         # self.cls_loss_func = Vari_focalLoss() # VFLoss
-        # self.cls_loss_func = SlideLoss(nn.BCEWithLogitsLoss(reduction='none')) # SlideLoss
-        self.cls_loss_func = QualityfocalLoss()  # 目前支持者目标检测需要注意！
+        self.cls_loss_func = SlideLoss(nn.BCEWithLogitsLoss(reduction='none')) # SlideLoss
+        # self.cls_loss_func = QualityfocalLoss()  # 目前支持者目标检测需要注意！
         # --------------------------------------------------------------------------------------------------------------
         self.hyp = h
         self.stride = m.stride  # model strides
@@ -504,7 +522,7 @@ class v8DetectionLoss:
                                          target_scores.to(dtype)).sum() / target_scores_sum  # BCE VFLoss Focal
         elif isinstance(self.cls_loss_func, SlideLoss):
             if fg_mask.sum():
-                auto_iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True).mean()
+                auto_iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, ShapeIoU=True).mean()
             else:
                 auto_iou = 0.1
             loss[1] = self.cls_loss_func(pred_scores, target_scores.to(dtype),
@@ -537,6 +555,7 @@ class v8DetectionLoss:
         # Bbox loss
         if fg_mask.sum():
             target_bboxes /= stride_tensor
+            # todo
             loss[0], loss[2] = self.bbox_loss(
                     pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
             )

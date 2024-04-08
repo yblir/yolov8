@@ -43,7 +43,7 @@ def model_forward(CFG):
     """Test the forward pass of the YOLO model."""
     model = YOLO(CFG, verbose=True)
     # model(source=SOURCE)  # also test no source and augment
-
+    model.predict(r"E:\GitHub\yolov8\ultralytics\assets\bus.jpg")
 
 if __name__ == '__main__':
     # 检测修改配置文件yaml后生成的的model是否能正常运行

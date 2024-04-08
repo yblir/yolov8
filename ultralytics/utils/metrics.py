@@ -12,8 +12,8 @@ import torch
 from ultralytics.utils import LOGGER, SimpleClass, TryExcept, plt_settings
 
 OKS_SIGMA = (
-    np.array([0.26, 0.25, 0.25, 0.35, 0.35, 0.79, 0.79, 0.72, 0.72, 0.62, 0.62, 1.07, 1.07, 0.87, 0.87, 0.89, 0.89])
-    / 10.0
+        np.array([0.26, 0.25, 0.25, 0.35, 0.35, 0.79, 0.79, 0.72, 0.72, 0.62, 0.62, 1.07, 1.07, 0.87, 0.87, 0.89, 0.89])
+        / 10.0
 )
 
 
@@ -37,7 +37,7 @@ def bbox_ioa(box1, box2, iou=False, eps=1e-7):
 
     # Intersection area
     inter_area = (np.minimum(b1_x2[:, None], b2_x2) - np.maximum(b1_x1[:, None], b2_x1)).clip(0) * (
-        np.minimum(b1_y2[:, None], b2_y2) - np.maximum(b1_y1[:, None], b2_y1)
+            np.minimum(b1_y2[:, None], b2_y2) - np.maximum(b1_y1[:, None], b2_y1)
     ).clip(0)
 
     # Box2 area
@@ -72,10 +72,120 @@ def box_iou(box1, box2, eps=1e-7):
     return inter / ((a2 - a1).prod(2) + (b2 - b1).prod(2) - inter + eps)
 
 
-def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
+# def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
+#     """
+#     Calculate Intersection over Union (IoU) of box1(1, 4) to box2(n, 4).
+#
+#     Args:
+#         box1 (torch.Tensor): A tensor representing a single bounding box with shape (1, 4).
+#         box2 (torch.Tensor): A tensor representing n bounding boxes with shape (n, 4).
+#         xywh (bool, optional): If True, input boxes are in (x, y, w, h) format. If False, input boxes are in
+#                                (x1, y1, x2, y2) format. Defaults to True.
+#         GIoU (bool, optional): If True, calculate Generalized IoU. Defaults to False.
+#         DIoU (bool, optional): If True, calculate Distance IoU. Defaults to False.
+#         CIoU (bool, optional): If True, calculate Complete IoU. Defaults to False.
+#         eps (float, optional): A small value to avoid division by zero. Defaults to 1e-7.
+#
+#     Returns:
+#         (torch.Tensor): IoU, GIoU, DIoU, or CIoU values depending on the specified flags.
+#     """
+#
+#     # Get the coordinates of bounding boxes
+#     if xywh:  # transform from xywh to xyxy
+#         (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+#         w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
+#         b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
+#         b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
+#     else:  # x1, y1, x2, y2 = box1
+#         b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+#         b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+#         w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
+#         w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
+#
+#     # Intersection area
+#     inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * (
+#         b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)
+#     ).clamp_(0)
+#
+#     # Union Area
+#     union = w1 * h1 + w2 * h2 - inter + eps
+#
+#     # IoU
+#     iou = inter / union
+#     if CIoU or DIoU or GIoU:
+#         cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex (smallest enclosing box) width
+#         ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
+#         if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+#             c2 = cw.pow(2) + ch.pow(2) + eps  # convex diagonal squared
+#             rho2 = (
+#                 (b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2) + (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)
+#             ) / 4  # center dist**2
+#             if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
+#                 v = (4 / math.pi**2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
+#                 with torch.no_grad():
+#                     alpha = v / (v - iou + (1 + eps))
+#                 return iou - (rho2 / c2 + v * alpha)  # CIoU
+#             return iou - rho2 / c2  # DIoU
+#         c_area = cw * ch + eps  # convex area
+#         return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
+#     return iou  # IoU
+
+class WIoU_Scale:
+    ''' monotonous: {
+            None: origin v1
+            True: monotonic FM v2
+            False: non-monotonic FM v3
+        }
+        momentum: The momentum of running mean'''
+    iou_mean = 1.
+    monotonous = False
+    _momentum = 1 - 0.5 ** (1 / 7000)
+    _is_train = True
+
+    def __init__(self, iou):
+        self.iou = iou
+        self._update(self)
+
+    @classmethod
+    def _update(cls, self):
+        if cls._is_train: cls.iou_mean = (1 - cls._momentum) * cls.iou_mean + \
+                                         cls._momentum * self.iou.detach().mean().item()
+
+    @classmethod
+    def _scaled_loss(cls, self, gamma=1.9, delta=3):
+        if isinstance(self.monotonous, bool):
+            if self.monotonous:
+                return (self.iou.detach() / self.iou_mean).sqrt()
+            else:
+                beta = self.iou.detach() / self.iou_mean
+                alpha = delta * torch.pow(gamma, beta - delta)
+                return beta / alpha
+        return 1
+
+
+def xyxy2xywh(x):
+    """
+    Convert bounding box coordinates from (x1, y1, x2, y2) format to (x, y, width, height) format where (x1, y1) is the
+    top-left corner and (x2, y2) is the bottom-right corner.
+    Args:
+        x (np.ndarray | torch.Tensor): The input bounding box coordinates in (x1, y1, x2, y2) format.
+    Returns:
+        y (np.ndarray | torch.Tensor): The bounding box coordinates in (x, y, width, height) format.
+    """
+    assert x.shape[-1] == 4, f"input shape last dimension expected 4 but input shape is {x.shape}"
+    y = torch.empty_like(x) if isinstance(x, torch.Tensor) else np.empty_like(x)  # faster than clone/copy
+    y[..., 0] = (x[..., 0] + x[..., 2]) / 2  # x center
+    y[..., 1] = (x[..., 1] + x[..., 3]) / 2  # y center
+    y[..., 2] = x[..., 2] - x[..., 0]  # width
+    y[..., 3] = x[..., 3] - x[..., 1]  # height
+    return y
+
+
+def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, EIoU=False, SIoU=False, WIoU=False,
+             ShapeIoU=False, hw=1, mpdiou=False, Inner=False, Focaleriou=False, d=0.00, u=0.95, ratio=0.7,
+             eps=1e-7, scale=0.0):
     """
     Calculate Intersection over Union (IoU) of box1(1, 4) to box2(n, 4).
-
     Args:
         box1 (torch.Tensor): A tensor representing a single bounding box with shape (1, 4).
         box2 (torch.Tensor): A tensor representing n bounding boxes with shape (n, 4).
@@ -84,47 +194,111 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
         GIoU (bool, optional): If True, calculate Generalized IoU. Defaults to False.
         DIoU (bool, optional): If True, calculate Distance IoU. Defaults to False.
         CIoU (bool, optional): If True, calculate Complete IoU. Defaults to False.
+        EIoU (bool, optional): If True, calculate Efficient IoU. Defaults to False.
+        SIoU (bool, optional): If True, calculate Scylla IoU. Defaults to False.
         eps (float, optional): A small value to avoid division by zero. Defaults to 1e-7.
-
     Returns:
         (torch.Tensor): IoU, GIoU, DIoU, or CIoU values depending on the specified flags.
     """
+    if Inner:
+        if not xywh:
+            box1, box2 = xyxy2xywh(box1), xyxy2xywh(box2)
+        (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+        b1_x1, b1_x2, b1_y1, b1_y2 = x1 - (w1 * ratio) / 2, x1 + (w1 * ratio) / 2, y1 - (h1 * ratio) / 2, y1 + (
+                h1 * ratio) / 2
+        b2_x1, b2_x2, b2_y1, b2_y2 = x2 - (w2 * ratio) / 2, x2 + (w2 * ratio) / 2, y2 - (h2 * ratio) / 2, y2 + (
+                h2 * ratio) / 2
+
+        # Intersection area
+        inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * \
+                (b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)).clamp_(0)
+
+        # Union Area
+        union = w1 * h1 * ratio * ratio + w2 * h2 * ratio * ratio - inter + eps
 
     # Get the coordinates of bounding boxes
-    if xywh:  # transform from xywh to xyxy
-        (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
-        w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
-        b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
-        b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
-    else:  # x1, y1, x2, y2 = box1
-        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
-        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
-        w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
-        w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
+    else:
+        if xywh:  # transform from xywh to xyxy
+            (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+            w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
+            b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
+            b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
+        else:  # x1, y1, x2, y2 = box1
+            b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+            b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+            w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
+            w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
 
-    # Intersection area
-    inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * (
-        b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)
-    ).clamp_(0)
-
-    # Union Area
-    union = w1 * h1 + w2 * h2 - inter + eps
-
-    # IoU
+        # Intersection area
+        inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * \
+                (b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)).clamp_(0)
+        # Union Area
+        union = w1 * h1 + w2 * h2 - inter + eps
+        # IoU
     iou = inter / union
-    if CIoU or DIoU or GIoU:
+    if Focaleriou:
+        iou = ((iou - d) / (u - d)).clamp(0, 1)  # default d=0.00,u=0.95
+
+    if CIoU or DIoU or GIoU or EIoU or SIoU or ShapeIoU or mpdiou or WIoU:
         cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex (smallest enclosing box) width
         ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
-        if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
-            c2 = cw.pow(2) + ch.pow(2) + eps  # convex diagonal squared
-            rho2 = (
-                (b2_x1 + b2_x2 - b1_x1 - b1_x2).pow(2) + (b2_y1 + b2_y2 - b1_y1 - b1_y2).pow(2)
-            ) / 4  # center dist**2
+        if CIoU or DIoU or EIoU or SIoU or mpdiou or WIoU or ShapeIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+            c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
+            rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2 + (b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center dist ** 2
             if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
-                v = (4 / math.pi**2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
+                v = (4 / math.pi ** 2) * (torch.atan(w2 / h2) - torch.atan(w1 / h1)).pow(2)
                 with torch.no_grad():
                     alpha = v / (v - iou + (1 + eps))
                 return iou - (rho2 / c2 + v * alpha)  # CIoU
+            elif EIoU:
+                rho_w2 = ((b2_x2 - b2_x1) - (b1_x2 - b1_x1)) ** 2
+                rho_h2 = ((b2_y2 - b2_y1) - (b1_y2 - b1_y1)) ** 2
+                cw2 = cw ** 2 + eps
+                ch2 = ch ** 2 + eps
+                return iou - (rho2 / c2 + rho_w2 / cw2 + rho_h2 / ch2)  # EIoU
+            elif SIoU:
+                # SIoU Loss https://arxiv.org/pdf/2205.12740.pdf
+                s_cw = (b2_x1 + b2_x2 - b1_x1 - b1_x2) * 0.5 + eps
+                s_ch = (b2_y1 + b2_y2 - b1_y1 - b1_y2) * 0.5 + eps
+                sigma = torch.pow(s_cw ** 2 + s_ch ** 2, 0.5)
+                sin_alpha_1 = torch.abs(s_cw) / sigma
+                sin_alpha_2 = torch.abs(s_ch) / sigma
+                threshold = pow(2, 0.5) / 2
+                sin_alpha = torch.where(sin_alpha_1 > threshold, sin_alpha_2, sin_alpha_1)
+                angle_cost = torch.cos(torch.arcsin(sin_alpha) * 2 - math.pi / 2)
+                rho_x = (s_cw / cw) ** 2
+                rho_y = (s_ch / ch) ** 2
+                gamma = angle_cost - 2
+                distance_cost = 2 - torch.exp(gamma * rho_x) - torch.exp(gamma * rho_y)
+                omiga_w = torch.abs(w1 - w2) / torch.max(w1, w2)
+                omiga_h = torch.abs(h1 - h2) / torch.max(h1, h2)
+                shape_cost = torch.pow(1 - torch.exp(-1 * omiga_w), 4) + torch.pow(1 - torch.exp(-1 * omiga_h), 4)
+                return iou - 0.5 * (distance_cost + shape_cost) + eps  # SIoU
+            elif ShapeIoU:
+                # Shape-Distance    #Shape-Distance    #Shape-Distance    #Shape-Distance    #Shape-Distance    #Shape-Distance    #Shape-Distance
+                ww = 2 * torch.pow(w2, scale) / (torch.pow(w2, scale) + torch.pow(h2, scale))
+                hh = 2 * torch.pow(h2, scale) / (torch.pow(w2, scale) + torch.pow(h2, scale))
+                cw = torch.max(b1_x2, b2_x2) - torch.min(b1_x1, b2_x1)  # convex width
+                ch = torch.max(b1_y2, b2_y2) - torch.min(b1_y1, b2_y1)  # convex height
+                c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
+                center_distance_x = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2) / 4
+                center_distance_y = ((b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4
+                center_distance = hh * center_distance_x + ww * center_distance_y
+                distance = center_distance / c2
+
+                # Shape-Shape    #Shape-Shape    #Shape-Shape    #Shape-Shape    #Shape-Shape    #Shape-Shape    #Shape-Shape    #Shape-Shape
+                omiga_w = hh * torch.abs(w1 - w2) / torch.max(w1, w2)
+                omiga_h = ww * torch.abs(h1 - h2) / torch.max(h1, h2)
+                shape_cost = torch.pow(1 - torch.exp(-1 * omiga_w), 4) + torch.pow(1 - torch.exp(-1 * omiga_h), 4)
+                return iou - distance - 0.5 * shape_cost
+            elif mpdiou:
+                d1 = (b2_x1 - b1_x1) ** 2 + (b2_y1 - b1_y1) ** 2
+                d2 = (b2_x2 - b1_x2) ** 2 + (b2_y2 - b1_y2) ** 2
+                return iou - d1 / hw.unsqueeze(1) - d2 / hw.unsqueeze(1)  # MPDIoU
+            elif WIoU:
+                self = WIoU_Scale(1 - iou)
+                dist = getattr(WIoU_Scale, '_scaled_loss')(self)
+                return iou * dist  # WIoU https://arxiv.org/abs/2301.10051
             return iou - rho2 / c2  # DIoU
         c_area = cw * ch + eps  # convex area
         return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
@@ -210,21 +384,22 @@ def probiou(obb1, obb2, CIoU=False, eps=1e-7):
     a2, b2, c2 = _get_covariance_matrix(obb2)
 
     t1 = (
-        ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
-    ) * 0.25
+                 ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / (
+                 (a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
+         ) * 0.25
     t2 = (((c1 + c2) * (x2 - x1) * (y1 - y2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)) * 0.5
     t3 = (
-        ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
-        / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
-        + eps
-    ).log() * 0.5
+                 ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
+                 / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
+                 + eps
+         ).log() * 0.5
     bd = (t1 + t2 + t3).clamp(eps, 100.0)
     hd = (1.0 - (-bd).exp() + eps).sqrt()
     iou = 1 - hd
     if CIoU:  # only include the wh aspect ratio part
         w1, h1 = obb1[..., 2:4].split(1, dim=-1)
         w2, h2 = obb2[..., 2:4].split(1, dim=-1)
-        v = (4 / math.pi**2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
+        v = (4 / math.pi ** 2) * ((w2 / h2).atan() - (w1 / h1).atan()).pow(2)
         with torch.no_grad():
             alpha = v / (v - iou + (1 + eps))
         return iou - v * alpha  # CIoU
@@ -252,14 +427,15 @@ def batch_probiou(obb1, obb2, eps=1e-7):
     a2, b2, c2 = (x.squeeze(-1)[None] for x in _get_covariance_matrix(obb2))
 
     t1 = (
-        ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
-    ) * 0.25
+                 ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / (
+                 (a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
+         ) * 0.25
     t2 = (((c1 + c2) * (x2 - x1) * (y1 - y2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)) * 0.5
     t3 = (
-        ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
-        / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
-        + eps
-    ).log() * 0.5
+                 ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
+                 / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
+                 + eps
+         ).log() * 0.5
     bd = (t1 + t2 + t3).clamp(eps, 100.0)
     hd = (1.0 - (-bd).exp() + eps).sqrt()
     return 1 - hd
@@ -408,16 +584,16 @@ class ConfusionMatrix:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")  # suppress empty matrix RuntimeWarning: All-NaN slice encountered
             sn.heatmap(
-                array,
-                ax=ax,
-                annot=nc < 30,
-                annot_kws={"size": 8},
-                cmap="Blues",
-                fmt=".2f" if normalize else ".0f",
-                square=True,
-                vmin=0.0,
-                xticklabels=ticklabels,
-                yticklabels=ticklabels,
+                    array,
+                    ax=ax,
+                    annot=nc < 30,
+                    annot_kws={"size": 8},
+                    cmap="Blues",
+                    fmt=".2f" if normalize else ".0f",
+                    square=True,
+                    vmin=0.0,
+                    xticklabels=ticklabels,
+                    yticklabels=ticklabels,
             ).set_facecolor((1, 1, 1))
         title = "Confusion Matrix" + " Normalized" * normalize
         ax.set_xlabel("True")
@@ -527,7 +703,7 @@ def compute_ap(recall, precision):
 
 
 def ap_per_class(
-    tp, conf, pred_cls, target_cls, plot=False, on_plot=None, save_dir=Path(), names=(), eps=1e-16, prefix=""
+        tp, conf, pred_cls, target_cls, plot=False, on_plot=None, save_dir=Path(), names=(), eps=1e-16, prefix=""
 ):
     """
     Computes the average precision per class for object detection evaluation.
@@ -834,14 +1010,14 @@ class DetMetrics(SimpleClass):
     def process(self, tp, conf, pred_cls, target_cls):
         """Process predicted results for object detection and update metrics."""
         results = ap_per_class(
-            tp,
-            conf,
-            pred_cls,
-            target_cls,
-            plot=self.plot,
-            save_dir=self.save_dir,
-            names=self.names,
-            on_plot=self.on_plot,
+                tp,
+                conf,
+                pred_cls,
+                target_cls,
+                plot=self.plot,
+                save_dir=self.save_dir,
+                names=self.names,
+                on_plot=self.on_plot,
         )[2:]
         self.box.nc = len(self.names)
         self.box.update(results)
@@ -943,28 +1119,28 @@ class SegmentMetrics(SimpleClass):
         """
 
         results_mask = ap_per_class(
-            tp_m,
-            conf,
-            pred_cls,
-            target_cls,
-            plot=self.plot,
-            on_plot=self.on_plot,
-            save_dir=self.save_dir,
-            names=self.names,
-            prefix="Mask",
+                tp_m,
+                conf,
+                pred_cls,
+                target_cls,
+                plot=self.plot,
+                on_plot=self.on_plot,
+                save_dir=self.save_dir,
+                names=self.names,
+                prefix="Mask",
         )[2:]
         self.seg.nc = len(self.names)
         self.seg.update(results_mask)
         results_box = ap_per_class(
-            tp,
-            conf,
-            pred_cls,
-            target_cls,
-            plot=self.plot,
-            on_plot=self.on_plot,
-            save_dir=self.save_dir,
-            names=self.names,
-            prefix="Box",
+                tp,
+                conf,
+                pred_cls,
+                target_cls,
+                plot=self.plot,
+                on_plot=self.on_plot,
+                save_dir=self.save_dir,
+                names=self.names,
+                prefix="Box",
         )[2:]
         self.box.nc = len(self.names)
         self.box.update(results_box)
@@ -1085,28 +1261,28 @@ class PoseMetrics(SegmentMetrics):
         """
 
         results_pose = ap_per_class(
-            tp_p,
-            conf,
-            pred_cls,
-            target_cls,
-            plot=self.plot,
-            on_plot=self.on_plot,
-            save_dir=self.save_dir,
-            names=self.names,
-            prefix="Pose",
+                tp_p,
+                conf,
+                pred_cls,
+                target_cls,
+                plot=self.plot,
+                on_plot=self.on_plot,
+                save_dir=self.save_dir,
+                names=self.names,
+                prefix="Pose",
         )[2:]
         self.pose.nc = len(self.names)
         self.pose.update(results_pose)
         results_box = ap_per_class(
-            tp,
-            conf,
-            pred_cls,
-            target_cls,
-            plot=self.plot,
-            on_plot=self.on_plot,
-            save_dir=self.save_dir,
-            names=self.names,
-            prefix="Box",
+                tp,
+                conf,
+                pred_cls,
+                target_cls,
+                plot=self.plot,
+                on_plot=self.on_plot,
+                save_dir=self.save_dir,
+                names=self.names,
+                prefix="Box",
         )[2:]
         self.box.nc = len(self.names)
         self.box.update(results_box)
@@ -1233,14 +1409,14 @@ class OBBMetrics(SimpleClass):
     def process(self, tp, conf, pred_cls, target_cls):
         """Process predicted results for object detection and update metrics."""
         results = ap_per_class(
-            tp,
-            conf,
-            pred_cls,
-            target_cls,
-            plot=self.plot,
-            save_dir=self.save_dir,
-            names=self.names,
-            on_plot=self.on_plot,
+                tp,
+                conf,
+                pred_cls,
+                target_cls,
+                plot=self.plot,
+                save_dir=self.save_dir,
+                names=self.names,
+                on_plot=self.on_plot,
         )[2:]
         self.box.nc = len(self.names)
         self.box.update(results)
