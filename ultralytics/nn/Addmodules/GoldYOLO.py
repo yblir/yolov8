@@ -34,10 +34,10 @@ class High_IFM(nn.Module):
         self.transformer_blocks = nn.ModuleList()
         for i in range(self.block_num):
             self.transformer_blocks.append(top_Block(
-                    embedding_dim, key_dim=key_dim, num_heads=num_heads,
-                    mlp_ratio=mlp_ratio, attn_ratio=attn_ratio,
-                    drop=drop, drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
-                    norm_cfg=norm_cfg, act_layer=act_layer))
+                embedding_dim, key_dim=key_dim, num_heads=num_heads,
+                mlp_ratio=mlp_ratio, attn_ratio=attn_ratio,
+                drop=drop, drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+                norm_cfg=norm_cfg, act_layer=act_layer))
 
     def forward(self, x):
         # token * N
@@ -141,7 +141,7 @@ class Attention(torch.nn.Module):
         self.to_v = Conv2d_BN(dim, self.dh, 1, norm_cfg=norm_cfg)
 
         self.proj = torch.nn.Sequential(activation(), Conv2d_BN(
-                self.dh, dim, bn_weight_init=0, norm_cfg=norm_cfg))
+            self.dh, dim, bn_weight_init=0, norm_cfg=norm_cfg))
 
     def forward(self, x):  # x (B,N,C)
         B, C, H, W = get_shape(x)
@@ -181,7 +181,7 @@ class Conv2d_BN(nn.Sequential):
         self.groups = groups
 
         self.add_module('c', nn.Conv2d(
-                a, b, ks, stride, pad, dilation, groups, bias=False))
+            a, b, ks, stride, pad, dilation, groups, bias=False))
         bn = build_norm_layer(norm_cfg, b)[1]
         nn.init.constant_(bn.weight, bn_weight_init)
         nn.init.constant_(bn.bias, 0)
@@ -264,7 +264,7 @@ class RepVGGBlock(nn.Module):
 
         else:
             self.rbr_identity = nn.BatchNorm2d(
-                    num_features=in_channels) if out_channels == in_channels and stride == 1 else None
+                num_features=in_channels) if out_channels == in_channels and stride == 1 else None
             self.rbr_dense = conv_bn(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                                      stride=stride, padding=padding, groups=groups)
             self.rbr_1x1 = conv_bn(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride,
@@ -375,14 +375,15 @@ class Inject(nn.Module):
             self,
             inp: int,
             oup: int,
+            # 从split获得两个tensor, 这里要指定用哪个,用第一个,全局的
             global_index: int,
-            norm_cfg=dict(type='BN', requires_grad=True),
+            norm_cfg_type="BN",
             activations=nn.ReLU6,
             global_inp=None,
     ) -> None:
         super().__init__()
         self.global_index = global_index
-        self.norm_cfg = norm_cfg
+        self.norm_cfg_type = dict(type=norm_cfg_type, requires_grad=True)
 
         if not global_inp:
             global_inp = inp
@@ -445,7 +446,9 @@ class Low_LAF(nn.Module):
         self.cv1 = SimConv(in_channels, out_channels, 1, 1)
         # todo 原来是2.5, why?
         # self.cv_fuse = SimConv(round(out_channels * 2.5), out_channels, 1, 1)
-        self.cv_fuse = SimConv(round(out_channels * 3), out_channels, 1, 1)
+        # self.cv_fuse = SimConv(round(out_channels * 3), out_channels, 1, 1)
+        # B站大佬改法
+        self.cv_fuse = SimConv(out_channels * 4, out_channels * 2, 1, 1)
         self.downsample = nn.functional.adaptive_avg_pool2d
 
     def forward(self, x):
@@ -471,13 +474,13 @@ class SimConv(nn.Module):
         if padding is None:
             padding = kernel_size // 2
         self.conv = nn.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
-                groups=groups,
-                bias=bias,
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=groups,
+            bias=bias,
         )
         self.bn = nn.BatchNorm2d(out_channels)
         self.act = nn.ReLU()
@@ -503,8 +506,8 @@ class Low_IFM(nn.Module):
         super().__init__()
         self.conv1 = Conv(in_channels, embed_dims, kernel_size=1, stride=1, padding=0)
         self.block = nn.ModuleList(
-                [RepVGGBlock(embed_dims, embed_dims) for _ in
-                 range(fuse_block_num)]) if fuse_block_num > 0 else nn.Identity
+            [RepVGGBlock(embed_dims, embed_dims) for _ in
+             range(fuse_block_num)]) if fuse_block_num > 0 else nn.Identity
         self.conv2 = Conv(embed_dims, out_channels, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x):
@@ -563,13 +566,13 @@ class Conv(nn.Module):
         if padding is None:
             padding = kernel_size // 2
         self.conv = nn.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
-                groups=groups,
-                bias=bias,
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=groups,
+            bias=bias,
         )
         self.bn = nn.BatchNorm2d(out_channels)
         self.act = nn.SiLU()
