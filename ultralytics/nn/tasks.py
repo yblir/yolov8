@@ -136,9 +136,11 @@ class BaseModel(nn.Module):
         Returns:
             (torch.Tensor): The last output of the model.
         """
+        # 如果从
         y, dt, embeddings = [], [], []  # outputs
         for m in self.model:
             if m.f != -1:  # if not from previous layer
+                # 如果!=-1, 说明不是从上一层,而是从更早的层获得输出(如concat时需要的层)
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
                 self._profile_one_layer(m, x, dt)
@@ -149,6 +151,7 @@ class BaseModel(nn.Module):
             except:
                 print(m)
                 raise
+            # 根据self.save列表保存模型输出
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
@@ -860,10 +863,13 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
     if verbose:
         LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}")
     ch = [ch]
+    # layer存储每层解析出的模块, save存储当前层索引, c2存储每层输出通道
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
     backbone = False
     goldyolo = False
+    # (f, n, m, args)->(from,repeats,module,args)
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
+        # 如果模块以nn开头,直接使用torch自带的模块,否则使用yaml指定的模块
         m = getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]  # get module
         for j, a in enumerate(args):
             if isinstance(a, str):
@@ -875,46 +881,24 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         #     width = 0.25
         # else:
         #     width = 0.50
+        # 计算当前模块重复次数
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
-        if m in {
-            Classify,
-            Conv,
-            ConvTranspose,
-            GhostConv,
-            Bottleneck,
-            GhostBottleneck,
-            SPP,
-            SPPF,
-            DWConv,
-            Focus,
-            BottleneckCSP,
-            C1,
-            C2,
-            C2f,
-            RepNCSPELAN4,
-            ADown,
-            SPPELAN,
-            C2fAttn,
-            C3,
-            C3TR,
-            C3Ghost,
-            nn.ConvTranspose2d,
-            DWConvTranspose2d,
-            C3x,
-            RepC3,
-            *add_conv,
-            *add_block,
-            # gold yolo ---------------------
-            SimConv,
-            # 专为goldyolo设计?
-            nn.Conv2d,
-        }:
+        # 不同模块的入参类型不同,所以要按照参数类型再划分一次
+        if m in {Classify, Conv, ConvTranspose, GhostConv, Bottleneck, GhostBottleneck, SPP, SPPF, DWConv, Focus,
+                 BottleneckCSP, C1, C2, C2f, RepNCSPELAN4, ADown, SPPELAN, C2fAttn, C3, C3TR, C3Ghost,
+                 nn.ConvTranspose2d, DWConvTranspose2d, C3x, RepC3,
+                 *add_conv, *add_block,SimConv,
+                 nn.Conv2d # 专为gold设计?
+                 }:
+            # c1:输入通道输,从上一级输出或指定层获得
             c1, c2 = ch[f], args[0]
             # todo
-            if m == SimConv and c2 != 512:
-                c1 = c1 // 2
-            if m is SimConv and c1 == 64:
-                c1 = c1 * 2
+            # if m == SimConv and c2 != 512:
+            #     c1 = c1 // 2
+            # if m is SimConv and c1 == 64:
+            #     c1 = c1 * 2
+            # 以下, 再对不能统一处理的模块进行单独处理
+            # c2!=nc,说明当前输出通道不是最终的模型输出, 通道数*width
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
             if m is C2fAttn:
@@ -922,19 +906,14 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 args[2] = int(
                         max(round(min(args[2], max_channels // 2 // 32)) * width, 1) if args[2] > 1 else args[2]
                 )  # num heads
-            if m == nn.Conv2d:
-                c1 = 704
-                c2 = 384
-                # c2=320
-                # todo yolov8s,临时魔改, 效果好查原因, 不好就随便啦
-                # c1 = 896
-                # c2 = 768
+
             args = [c1, c2, *args[1:]]
-            # todo 新增的模块，要在此处添加重复数量
+            # 有重复次数的模块,都要插入重复因子.
             if m in (BottleneckCSP, C1, C2, C2f, C2fAttn, C3, C3TR, C3Ghost, C3x, RepC3, *add_block):
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is AIFI:
+            # 输入通道+剩余参数, 在v8中没见过这个模块
             args = [ch[f], *args]
         elif m in {HGStem, HGBlock}:
             c1, cm, c2 = ch[f], args[0], args[1]
@@ -947,6 +926,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
+            # 没有参数, 主要用于FPN层,有多个输入
             c2 = sum(ch[x] for x in f)
         # --------------------------------------------------------------------------------------------------------------
         # 魔改的,GOLD-yolo, 需要特殊处理的模块,自行处理逻辑
@@ -965,8 +945,8 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             c1, c2 = ch[f[1]], args[0]
             if c1 != 256:
                 c1 = c1 // 2
-            if c1==64:
-                c1=c1*2
+            if c1 == 64:
+                c1 = c1 * 2
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
             args = [c1, c2, *args[1:]]
@@ -1013,9 +993,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         #     c2 = sum(args[1])
 
         # --------------------------------------------------------------------------------------------------------------
-
         # todo 检测头魔改添加在这里,不能在上面主干模块中
         elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn, *add_detect}:
+            # 此时f是输出层索引, list
             args.append([ch[x] for x in f])
             if m is Segment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
@@ -1052,14 +1032,16 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             LOGGER.info(f"{i:>3}{str(f):>20}{n_:>3}{m.np:10.0f}  {t:<45}{str(args):<30}")  # print
         save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         layers.append(m_)
-        if i == 0:
+        if i == 0:  # 由于for之前使用ch=[ch]做初始化, 这里做一次重置, 只执行一次
             ch = []
-        if isinstance(c2, list) and not goldyolo:
-            ch.extend(c2)
-            if len(c2) != 5:
-                ch.insert(0, 0)
-        else:
-            ch.append(c2)
+        # if isinstance(c2, list) and not goldyolo:
+        #     ch.extend(c2)
+        #     if len(c2) != 5:
+        #         ch.insert(0, 0)
+        # else:
+        #     ch.append(c2)
+        # 添加当前层的输出通道数
+        ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
 
 

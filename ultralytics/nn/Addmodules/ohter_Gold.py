@@ -79,7 +79,7 @@ class RepVGGBlock(nn.Module):
 
         else:
             self.rbr_identity = nn.BatchNorm2d(
-                num_features=in_channels) if out_channels == in_channels and stride == 1 else None
+                    num_features=in_channels) if out_channels == in_channels and stride == 1 else None
             self.rbr_dense = conv_bn(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                                      stride=stride, padding=padding, groups=groups)
             self.rbr_1x1 = conv_bn(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride,
@@ -227,9 +227,9 @@ class IFM(nn.Module):
         super().__init__()
 
         self.conv = nn.Sequential(
-            Conv(inc, embed_dim_p),
-            *[RepVGGBlock(embed_dim_p, embed_dim_p) for _ in range(fuse_block_num)],
-            Conv(embed_dim_p, sum(ouc))
+                Conv(inc, embed_dim_p),
+                *[RepVGGBlock(embed_dim_p, embed_dim_p) for _ in range(fuse_block_num)],
+                Conv(embed_dim_p, sum(ouc))
         )
 
     def forward(self, x):
@@ -266,8 +266,11 @@ class InjectionMultiSum_Auto_pool(nn.Module):
         x_g: global features
         x_l: local features
         '''
+
         x_l, x_g = x
+        # 40 * 40 * 512
         B, C, H, W = x_l.shape
+        # 40 * 40 * 512
         g_B, g_C, g_H, g_W = x_g.shape
         use_pool = H < g_H
 
@@ -444,9 +447,9 @@ class TopBasicLayer(nn.Module):
         self.transformer_blocks = nn.ModuleList()
         for i in range(self.block_num):
             self.transformer_blocks.append(top_Block(
-                embedding_dim, key_dim=key_dim, num_heads=num_heads,
-                mlp_ratio=mlp_ratio, attn_ratio=attn_ratio,
-                drop=drop, drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path))
+                    embedding_dim, key_dim=key_dim, num_heads=num_heads,
+                    mlp_ratio=mlp_ratio, attn_ratio=attn_ratio,
+                    drop=drop, drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path))
         self.conv = nn.Conv2d(embedding_dim, sum(ouc_list), 1)
 
     def forward(self, x):

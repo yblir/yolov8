@@ -443,7 +443,7 @@ class Low_LAF(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.cv1 = SimConv(in_channels, out_channels, 1, 1)
-        # todo
+        # todo 原来是2.5, why?
         # self.cv_fuse = SimConv(round(out_channels * 2.5), out_channels, 1, 1)
         self.cv_fuse = SimConv(round(out_channels * 3), out_channels, 1, 1)
         self.downsample = nn.functional.adaptive_avg_pool2d
@@ -519,18 +519,11 @@ class Low_FAM(nn.Module):
     def __init__(self):
         super().__init__()
         self.avg_pool = nn.functional.adaptive_avg_pool2d
-        self.conv = nn.Conv2d(
-                960,
-                480,
-                kernel_size=1,
-                stride=1,
-                padding=0,
-        )
-        self.bn = nn.BatchNorm2d(480)
-        self.act = nn.SiLU()
 
     def forward(self, x):
+        # 从主干模型接受的4个输入
         x_l, x_m, x_s, x_n = x
+        # 要对齐的b4的shape, 40*40
         B, C, H, W = x_s.shape
         # output_size = np.array([H, W])
         output_size = [H, W]
@@ -538,12 +531,16 @@ class Low_FAM(nn.Module):
         if torch.onnx.is_in_onnx_export():
             self.avg_pool = onnx_AdaptiveAvgPool2d
 
+        # 其中两个进行池化下采样->(40*40*256),(40*40*128)
         x_l = self.avg_pool(x_l, output_size)
         x_m = self.avg_pool(x_m, output_size)
+        # 另外一个进行上采样(40*40*512)
         x_n = F.interpolate(x_n, size=(H, W), mode='bilinear', align_corners=False)
 
-        out = torch.cat([x_l, x_m, x_s, x_n], 1)
+        # 通道数(1024+512+256+128)*width=1920*width, shape=(b,40,40,1920*width)
+        out = torch.cat([x_l, x_m, x_s, x_n], dim=1)
         out = self.act(self.bn(self.conv(out)))
+
         return out
 
 
