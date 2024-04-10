@@ -4,11 +4,18 @@ import torch.nn.functional as F
 import numpy as np
 from mmcv.cnn import ConvModule, build_norm_layer
 
-__all__ = ['Low_FAM', 'Low_IFM', 'Split', 'SimConv', 'Low_LAF', 'Inject', 'RepBlock', 'High_FAM', 'High_IFM',
+__all__ = ['Low_FAM', 'Low_IFM', 'SimConv', 'Low_LAF', 'Inject', 'RepBlock', 'High_FAM', 'High_IFM',
            'High_LAF']
 
 
 class High_LAF(nn.Module):
+    """
+    原名AdvPoolFusion
+    lightweight adjacent layer fusion
+    LAF是一个轻量的邻层融合模块，如下图所示，对输入的local特征(Bi或pi)先和邻域特征融合，
+    然后再走inject模块，这样local特征图也具有了多层的信息。
+    深层会融合两个特征
+    """
     def forward(self, x1, x2):
         if torch.onnx.is_in_onnx_export():
             self.pool = onnx_AdaptiveAvgPool2d
@@ -16,28 +23,38 @@ class High_LAF(nn.Module):
             self.pool = nn.functional.adaptive_avg_pool2d
 
         N, C, H, W = x2.shape
-        # output_size = np.array([H, W])
-        output_size = [H, W]
+        output_size = np.array([H, W])
+
         x1 = self.pool(x1, output_size)
 
         return torch.cat([x1, x2], 1)
 
 
 class High_IFM(nn.Module):
+    """
+    原名TopBasicLayer
+    深层特征信息融合
+    """
+
     def __init__(self, block_num, embedding_dim, key_dim, num_heads,
-                 mlp_ratio=4., attn_ratio=2., drop=0., attn_drop=0., drop_path=0.,
+                 mlp_ratio=4., attn_ratio=2., drop=0.,
+                 # attn_drop=0.,未使用的参数,注释掉
+                 # todo 原始是drop_path, 但配置文件中用的是drop_path_ratio
+                 #  和depths(与模型规格有关,l模型时为3,m时为2)
+                 # drop_path=0.,
+                 drop_path_ratio=0.1, depths=2,
                  norm_cfg=dict(type='BN', requires_grad=True),
                  act_layer=nn.ReLU6):
         super().__init__()
         self.block_num = block_num
-        drop_path = [x.item() for x in torch.linspace(0, drop_path[0], drop_path[1])]  # 0.1, 2
+        drop_path = [x.item() for x in torch.linspace(0, drop_path_ratio, depths)]  # 0.1, 2
         self.transformer_blocks = nn.ModuleList()
         for i in range(self.block_num):
             self.transformer_blocks.append(top_Block(
-                    embedding_dim, key_dim=key_dim, num_heads=num_heads,
-                    mlp_ratio=mlp_ratio, attn_ratio=attn_ratio,
-                    drop=drop, drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
-                    norm_cfg=norm_cfg, act_layer=act_layer))
+                embedding_dim, key_dim=key_dim, num_heads=num_heads,
+                mlp_ratio=mlp_ratio, attn_ratio=attn_ratio,
+                drop=drop, drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+                norm_cfg=norm_cfg, act_layer=act_layer))
 
     def forward(self, x):
         # token * N
@@ -141,7 +158,7 @@ class Attention(torch.nn.Module):
         self.to_v = Conv2d_BN(dim, self.dh, 1, norm_cfg=norm_cfg)
 
         self.proj = torch.nn.Sequential(activation(), Conv2d_BN(
-                self.dh, dim, bn_weight_init=0, norm_cfg=norm_cfg))
+            self.dh, dim, bn_weight_init=0, norm_cfg=norm_cfg))
 
     def forward(self, x):  # x (B,N,C)
         B, C, H, W = get_shape(x)
@@ -181,7 +198,7 @@ class Conv2d_BN(nn.Sequential):
         self.groups = groups
 
         self.add_module('c', nn.Conv2d(
-                a, b, ks, stride, pad, dilation, groups, bias=False))
+            a, b, ks, stride, pad, dilation, groups, bias=False))
         bn = build_norm_layer(norm_cfg, b)[1]
         nn.init.constant_(bn.weight, bn_weight_init)
         nn.init.constant_(bn.bias, 0)
@@ -189,6 +206,11 @@ class Conv2d_BN(nn.Sequential):
 
 
 class High_FAM(nn.Module):
+    """
+    原名PyramidPoolAgg
+    深层特征信息对齐 Feature Alignment Module
+    """
+
     def __init__(self, stride, pool_mode='onnx'):
         super().__init__()
         self.stride = stride
@@ -202,8 +224,7 @@ class High_FAM(nn.Module):
         H = (H - 1) // self.stride + 1
         W = (W - 1) // self.stride + 1
 
-        # output_size = np.array([H, W])
-        output_size = [H, W]
+        output_size = np.array([H, W])
 
         if not hasattr(self, 'pool'):
             self.pool = nn.functional.adaptive_avg_pool2d
@@ -264,7 +285,7 @@ class RepVGGBlock(nn.Module):
 
         else:
             self.rbr_identity = nn.BatchNorm2d(
-                    num_features=in_channels) if out_channels == in_channels and stride == 1 else None
+                num_features=in_channels) if out_channels == in_channels and stride == 1 else None
             self.rbr_dense = conv_bn(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                                      stride=stride, padding=padding, groups=groups)
             self.rbr_1x1 = conv_bn(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride,
@@ -371,26 +392,31 @@ class RepBlock(nn.Module):
 
 
 class Inject(nn.Module):
+    """
+    原名InjectionMultiSum_Auto_pool
+    信息注入模块
+    """
+
     def __init__(
             self,
             inp: int,
             oup: int,
-            # 从split获得两个tensor, 这里要指定用哪个,用第一个,全局的
+            # 源码中没有index参数. 从split获得两个tensor, 这里要指定用哪个,用第一个,全局的
             global_index: int,
-            norm_cfg_type="BN",
-            activations=nn.ReLU6,
+            norm_cfg=dict(type='BN', requires_grad=True),
+            # activations=None, 未使用, 注释掉
             global_inp=None,
     ) -> None:
         super().__init__()
         self.global_index = global_index
-        self.norm_cfg_type = dict(type=norm_cfg_type, requires_grad=True)
+        self.norm_cfg = dict(type=norm_cfg, requires_grad=True)
 
         if not global_inp:
             global_inp = inp
 
-        self.local_embedding = ConvModule(inp, oup, kernel_size=1, norm_cfg=self.norm_cfg_type, act_cfg=None)
-        self.global_embedding = ConvModule(global_inp, oup, kernel_size=1, norm_cfg=self.norm_cfg_type, act_cfg=None)
-        self.global_act = ConvModule(global_inp, oup, kernel_size=1, norm_cfg=self.norm_cfg_type, act_cfg=None)
+        self.local_embedding = ConvModule(inp, oup, kernel_size=1, norm_cfg=self.norm_cfg, act_cfg=None)
+        self.global_embedding = ConvModule(global_inp, oup, kernel_size=1, norm_cfg=self.norm_cfg, act_cfg=None)
+        self.global_act = ConvModule(global_inp, oup, kernel_size=1, norm_cfg=self.norm_cfg, act_cfg=None)
         self.act = h_sigmoid()
 
     def forward(self, x):
@@ -405,13 +431,13 @@ class Inject(nn.Module):
         use_pool = H < g_H
 
         local_feat = self.local_embedding(x_l)
+
         global_act = self.global_act(x_g)
         global_feat = self.global_embedding(x_g)
 
         if use_pool:
             avg_pool = get_avg_pool()
-            # output_size = np.array([H, W])
-            output_size = [H, W]
+            output_size = np.array([H, W])
 
             sig_act = avg_pool(global_act, output_size)
             global_feat = avg_pool(global_feat, output_size)
@@ -442,21 +468,26 @@ def get_avg_pool():
 
 
 class Low_LAF(nn.Module):
+    """
+    lightweight adjacent layer fusion
+    LAF是一个轻量的邻层融合模块，如下图所示，对输入的local特征(Bi或pi)先和邻域特征融合，
+    然后再走inject模块，这样local特征图也具有了多层的信息。
+    浅层会融合3个特征
+    """
+
     def __init__(self, in_channels_list, out_channels):
         super().__init__()
         # 对齐40*40尺寸
         self.cv1 = SimConv(in_channels_list[1], out_channels, 1, 1)
-        # todo 原来是2.5, why?
-        # self.cv_fuse = SimConv(round(out_channels * 2.5), out_channels, 1, 1)
-        # self.cv_fuse = SimConv(round(out_channels * 3), out_channels, 1, 1)
-        # B站大佬改法
-        self.cv_fuse = SimConv(448, out_channels, 1, 1)
+        self.cv_fuse = SimConv(out_channels * 3, out_channels, 1, 1)
         self.downsample = nn.functional.adaptive_avg_pool2d
 
     def forward(self, x):
+        """
+        :param x: list,有3个tensor
+        """
         N, C, H, W = x[1].shape
-        # output_size = np.array([H, W])
-        output_size = [H, W]
+        output_size = (H, W)
 
         if torch.onnx.is_in_onnx_export():
             self.downsample = onnx_AdaptiveAvgPool2d
@@ -469,20 +500,23 @@ class Low_LAF(nn.Module):
 
 
 class SimConv(nn.Module):
-    '''Normal Conv with ReLU VAN_activation'''
+    """
+    Normal Conv with ReLU VAN_activation
+    主要功能是通道减半
+    """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, groups=1, bias=False, padding=None):
         super().__init__()
         if padding is None:
             padding = kernel_size // 2
         self.conv = nn.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
-                groups=groups,
-                bias=bias,
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=groups,
+            bias=bias,
         )
         self.bn = nn.BatchNorm2d(out_channels)
         self.act = nn.ReLU()
@@ -494,17 +528,22 @@ class SimConv(nn.Module):
         return self.act(self.conv(x))
 
 
-class Split(nn.Module):
-    def __init__(self, trans_channels):
-        super().__init__()
-        self.trans_channels = trans_channels
-
-    def forward(self, x):
-        return x.split(self.trans_channels, dim=1)
+# class Split(nn.Module):
+#     def __init__(self, trans_channels):
+#         super().__init__()
+#         self.trans_channels = trans_channels
+#
+#     def forward(self, x):
+#         return x.split(self.trans_channels, dim=1)
 
 
 class Low_IFM(nn.Module):
-    def __init__(self, in_channels, out_channels, embed_dims, fuse_block_num):
+    """
+    浅层特征信息融合模块
+    conv-repconv->conv,最后输出split后的两个tensor
+    """
+
+    def __init__(self, in_channels, out_channels, embed_dims, fuse_block_num, trans_channels):
         """
         :param in_channels:
         :param out_channels:
@@ -514,19 +553,25 @@ class Low_IFM(nn.Module):
         super().__init__()
         self.conv1 = Conv(in_channels, embed_dims, kernel_size=1, stride=1, padding=0)
         self.block = nn.ModuleList(
-                [RepVGGBlock(embed_dims, embed_dims) for _ in
-                 range(fuse_block_num)]) if fuse_block_num > 0 else nn.Identity
+            [RepVGGBlock(embed_dims, embed_dims) for _ in
+             range(fuse_block_num)]) if fuse_block_num > 0 else nn.Identity
         self.conv2 = Conv(embed_dims, out_channels, kernel_size=1, stride=1, padding=0)
+        self.trans_channels = trans_channels
 
     def forward(self, x):
         x = self.conv1(x)
         for b in self.block:
             x = b(x)
         out = self.conv2(x)
-        return out
+        return out.split(self.trans_channels, dim=1)
 
 
 class Low_FAM(nn.Module):
+    """
+    原名为SimFusion_4in
+    功能为拼接从主干提取的4个特征层,特征对齐
+    """
+
     def __init__(self):
         super().__init__()
         self.avg_pool = nn.functional.adaptive_avg_pool2d
@@ -536,8 +581,7 @@ class Low_FAM(nn.Module):
         x_l, x_m, x_s, x_n = x
         # 要对齐的b4的shape, 40*40
         B, C, H, W = x_s.shape
-        # output_size = np.array([H, W])
-        output_size = [H, W]
+        output_size = np.array([H, W])
 
         if torch.onnx.is_in_onnx_export():
             self.avg_pool = onnx_AdaptiveAvgPool2d
@@ -573,13 +617,13 @@ class Conv(nn.Module):
         if padding is None:
             padding = kernel_size // 2
         self.conv = nn.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
-                groups=groups,
-                bias=bias,
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=groups,
+            bias=bias,
         )
         self.bn = nn.BatchNorm2d(out_channels)
         self.act = nn.SiLU()
