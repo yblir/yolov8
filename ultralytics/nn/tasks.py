@@ -14,16 +14,18 @@ from .Addmodules.GoldYOLO import Low_FAM, Low_IFM, Split, SimConv, Low_LAF, Inje
 
 # from .Addmodules.ohter_Gold import IFM, SimFusion_3in, SimFusion_4in, InjectionMultiSum_Auto_pool, PyramidPoolAgg, \
 #     TopBasicLayer, AdvPoolFusion
-# 魔改卷积快,像conv+bn+rule
 
+# 魔改卷积快,像conv+bn+rule
 add_conv = [ODConv2dYolo, ]
 # 对C1,C3,C2f这样的模块封装,主要添加在模块重复区域, 输入输出+其他参数
 add_block = [C2f_ODConv, CSPStage, C2f_DLKA, ASCPA,
              # gold-yolo
-             Low_IFM,SimConv,RepBlock
+             Low_IFM, Low_LAF, SimConv, RepBlock,
              ]
+# 禁止插入重复次数的参数, 如gold的各个模块
+forbid_insert = [Low_IFM, Low_LAF, SimConv]
 # 与concat类似,初始化不需要参数, forward接受tensor然后通道维度合并在一起
-add_concat = [Low_FAM, High_FAM]
+add_concat = [Low_FAM, High_FAM, High_LAF]
 # 最后的检测头魔改
 add_detect = [Detect_AFPN3, Detect_FASFF, RepHead]
 # ----------------------------------------------------------------------------------------------------------------------
@@ -150,11 +152,9 @@ class BaseModel(nn.Module):
                 self._profile_one_layer(m, x, dt)
 
             # todo gold-yolo, 这里要修改
-            try:
-                x = m(*x) if m.input_nums > 1 else m(x)
-            except:
-                print(m)
-                raise
+
+            # x = m(*x) if m.input_nums > 1 else m(x)
+            x = m(x)
             # 根据self.save列表保存模型输出
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
@@ -168,8 +168,8 @@ class BaseModel(nn.Module):
     def _predict_augment(self, x):
         """Perform augmentations on input image x and return augmented inference."""
         LOGGER.warning(
-            f"WARNING ⚠️ {self.__class__.__name__} does not support augmented inference yet. "
-            f"Reverting to single-scale inference instead."
+                f"WARNING ⚠️ {self.__class__.__name__} does not support augmented inference yet. "
+                f"Reverting to single-scale inference instead."
         )
         return self._predict_once(x)
 
@@ -529,8 +529,8 @@ class RTDETRDetectionModel(DetectionModel):
         batch_idx = batch["batch_idx"]
         gt_groups = [(batch_idx == i).sum().item() for i in range(bs)]
         targets = {
-            "cls": batch["cls"].to(img.device, dtype=torch.long).view(-1),
-            "bboxes": batch["bboxes"].to(device=img.device),
+            "cls"      : batch["cls"].to(img.device, dtype=torch.long).view(-1),
+            "bboxes"   : batch["bboxes"].to(device=img.device),
             "batch_idx": batch_idx.to(img.device, dtype=torch.long).view(-1),
             "gt_groups": gt_groups,
         }
@@ -547,11 +547,11 @@ class RTDETRDetectionModel(DetectionModel):
         dec_scores = torch.cat([enc_scores.unsqueeze(0), dec_scores])
 
         loss = self.criterion(
-            (dec_bboxes, dec_scores), targets, dn_bboxes=dn_bboxes, dn_scores=dn_scores, dn_meta=dn_meta
+                (dec_bboxes, dec_scores), targets, dn_bboxes=dn_bboxes, dn_scores=dn_scores, dn_meta=dn_meta
         )
         # NOTE: There are like 12 losses in RTDETR, backward with all losses but only show the main three losses.
         return sum(loss.values()), torch.as_tensor(
-            [loss[k].detach() for k in ["loss_giou", "loss_class", "loss_bbox"]], device=img.device
+                [loss[k].detach() for k in ["loss_giou", "loss_class", "loss_bbox"]], device=img.device
         )
 
     def predict(self, x, profile=False, visualize=False, batch=None, augment=False, embed=None):
@@ -742,8 +742,8 @@ def torch_safe_load(weight):
         with temporary_modules(
                 {
                     "ultralytics.yolo.utils": "ultralytics.utils",
-                    "ultralytics.yolo.v8": "ultralytics.models.yolo",
-                    "ultralytics.yolo.data": "ultralytics.data",
+                    "ultralytics.yolo.v8"   : "ultralytics.models.yolo",
+                    "ultralytics.yolo.data" : "ultralytics.data",
                 }
         ):  # for legacy 8.0 Classify and Pose models
             ckpt = torch.load(file, map_location="cpu")
@@ -751,19 +751,19 @@ def torch_safe_load(weight):
     except ModuleNotFoundError as e:  # e.name is missing module name
         if e.name == "models":
             raise TypeError(
-                emojis(
-                    f"ERROR ❌️ {weight} appears to be an Ultralytics YOLOv5 model originally trained "
-                    f"with https://github.com/ultralytics/yolov5.\nThis model is NOT forwards compatible with "
-                    f"YOLOv8 at https://github.com/ultralytics/ultralytics."
-                    f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
-                    f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'"
-                )
+                    emojis(
+                            f"ERROR ❌️ {weight} appears to be an Ultralytics YOLOv5 model originally trained "
+                            f"with https://github.com/ultralytics/yolov5.\nThis model is NOT forwards compatible with "
+                            f"YOLOv8 at https://github.com/ultralytics/ultralytics."
+                            f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
+                            f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'"
+                    )
             ) from e
         LOGGER.warning(
-            f"WARNING ⚠️ {weight} appears to require '{e.name}', which is not in ultralytics requirements."
-            f"\nAutoInstall will run now for '{e.name}' but this feature will be removed in the future."
-            f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
-            f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'"
+                f"WARNING ⚠️ {weight} appears to require '{e.name}', which is not in ultralytics requirements."
+                f"\nAutoInstall will run now for '{e.name}' but this feature will be removed in the future."
+                f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
+                f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'"
         )
         check_requirements(e.name)  # install missing module
         ckpt = torch.load(file, map_location="cpu")
@@ -771,8 +771,8 @@ def torch_safe_load(weight):
     if not isinstance(ckpt, dict):
         # File is likely a YOLO instance saved with i.e. torch.save(model, "saved_model.pt")
         LOGGER.warning(
-            f"WARNING ⚠️ The file '{weight}' appears to be improperly saved or formatted. "
-            f"For optimal results, use model.save('filename.pt') to correctly save YOLO models."
+                f"WARNING ⚠️ The file '{weight}' appears to be improperly saved or formatted. "
+                f"For optimal results, use model.save('filename.pt') to correctly save YOLO models."
         )
         ckpt = {"model": ckpt.model}
 
@@ -879,12 +879,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             if isinstance(a, str):
                 with contextlib.suppress(ValueError):
                     args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
-        # todo
-        # if m in (
-        #         Low_FAM, Low_IFM, Split, SimConv, Low_LAF, Inject, RepBlock, High_FAM, High_IFM, High_LAF, nn.Conv2d):
-        #     width = 0.25
-        # else:
-        #     width = 0.50
+
         # 计算当前模块重复次数
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
         # 不同模块的入参类型不同,所以要按照参数类型再划分一次
@@ -895,12 +890,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                  nn.Conv2d  # 专为gold设计?
                  }:
             # c1:输入通道输,从上一级输出或指定层获得
-            c1, c2 = ch[f], args[0]
-            # todo
-            # if m == SimConv and c2 != 512:
-            #     c1 = c1 // 2
-            # if m is SimConv and c1 == 64:
-            #     c1 = c1 * 2
+            # todo c1改为可以接受list, 拿到参数后自定义模块自行处理参数
+            c1, c2 = ([ch[index] for index in f], args[0]) if isinstance(f, list) else (ch[f], args[0])
+
             # 以下, 再对不能统一处理的模块进行单独处理
             # c2!=nc,说明当前输出通道不是最终的模型输出, 通道数*width
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
@@ -908,14 +900,16 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             if m is C2fAttn:
                 args[1] = make_divisible(min(args[1], max_channels // 2) * width, 8)  # embed channels
                 args[2] = int(
-                    max(round(min(args[2], max_channels // 2 // 32)) * width, 1) if args[2] > 1 else args[2]
+                        max(round(min(args[2], max_channels // 2 // 32)) * width, 1) if args[2] > 1 else args[2]
                 )  # num heads
 
             args = [c1, c2, *args[1:]]
-            # 有重复次数的模块,都要插入重复因子.
+            # 有残差块重复次数的模块,都要插入重复因子.
             if m in (BottleneckCSP, C1, C2, C2f, C2fAttn, C3, C3TR, C3Ghost, C3x, RepC3, *add_block):
-                args.insert(2, n)  # number of repeats
-                n = 1
+                # todo 如果不是禁止部分模块插入重复项,再进行
+                if m not in {*forbid_insert}:
+                    args.insert(2, n)  # number of repeats
+                    n = 1
         elif m is AIFI:
             # 输入通道+剩余参数, 在v8中没见过这个模块
             args = [ch[f], *args]
@@ -929,27 +923,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             c2 = args[1] if args[3] else args[1] * 4
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
-        elif m is (Concat, add_concat):
+        elif m in {Concat, *add_concat}:
             # 类的init没有参数, 主要用于FPN层, 输出通道数之和
             c2 = sum(ch[x] for x in f)
-        # --------------------------------------------------------------------------------------------------------------
-        # 魔改的,GOLD-yolo, 需要特殊处理的模块,自行处理逻辑
-        # elif m in (Low_FAM, High_FAM, High_LAF):
-        #     c2 = sum(ch[x] for x in f)
-            # if m is Low_FAM:
-            #     c2=c2*2
-        elif m is Low_IFM:
-            c1, c2 = ch[f], args[2]
-            # todo
-            # c1 = c1 // 2
-            if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
-                c2 = make_divisible(min(c2, max_channels) * width, 8)
-            args = [c1, *args[:-1], c2]
-        elif m is Low_LAF:
-            c1, c2 = ch[f[1]], args[0]
-            if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
-                c2 = make_divisible(min(c2, max_channels) * width, 8)
-            args = [c1, c2, *args[1:]]
         elif m is Inject:
             # 从split拿结果
             global_index = args[1]
@@ -957,42 +933,14 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
             args = [c1, c2, global_index]
-        # elif m is RepBlock:
-        #     c1, c2 = ch[f], args[0]
-        #     if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
-        #         c2 = make_divisible(min(c2, max_channels) * width, 8)
-        #     nums_repeat = max(round(args[1] * depth), 1) if args[1] > 1 else args[1]  # depth gain
-        #     args = [c1, c2, nums_repeat]
+
         elif m is Split:
             c2 = []
             for arg in args:
                 if arg != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
                     c2.append(make_divisible(min(arg, max_channels) * width, 8))
             args = [c2]
-        # --------------------------------------------------------------------------------------------------------------
-        # Gold
-        # elif m in {SimFusion_4in, AdvPoolFusion}:
-        #     c2 = sum(ch[x] for x in f)
-        # elif m is SimFusion_3in:
-        #     c2 = args[0]
-        #     if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
-        #         c2 = make_divisible(min(c2, max_channels) * width, 8)
-        #     args = [[ch[f_] for f_ in f], c2]
-        # elif m is IFM:
-        #     c1 = ch[f]
-        #     c2 = sum(args[0])
-        #     args = [c1, *args]
-        # elif m is InjectionMultiSum_Auto_pool:
-        #     c1 = ch[f[0]]
-        #     c2 = args[0]
-        #     args = [c1, *args]
-        # elif m is PyramidPoolAgg:
-        #     c2 = args[0]
-        #     args = [sum([ch[f_] for f_ in f]), *args]
-        # elif m is TopBasicLayer:
-        #     c2 = sum(args[1])
 
-        # --------------------------------------------------------------------------------------------------------------
         # todo 检测头魔改添加在这里,不能在上面主干模块中
         elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn, *add_detect}:
             # 此时f是输出层索引, list
@@ -1002,31 +950,17 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         elif m is RTDETRDecoder:  # special case, channels arg must be passed in index 1
             args.insert(1, [ch[x] for x in f])
         elif m is CBLinear:
-            c2 = args[0]
-            c1 = ch[f]
+            c1, c2 = ch[f], args[0]
             args = [c1, c2, *args[1:]]
         elif m is CBFuse:
             c2 = ch[f[-1]]
         else:
             c2 = ch[f]
 
-        # gold要修改地方有点多1
-        if isinstance(c2, list) and not goldyolo:
-            m_ = m
-            m_.backbone = True
-        else:
-            m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
-            t = str(m)[8:-2].replace('__main__.', '')  # module type
-
+        m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
+        t = str(m)[8:-2].replace("__main__.", "")  # module type
         m.np = sum(x.numel() for x in m_.parameters())  # number params
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
-
-        # gold要修改地方有点多1
-        if m in [Inject, High_LAF]:
-            # input nums
-            m_.input_nums = len(f)
-        else:
-            m_.input_nums = 1
 
         if verbose:
             LOGGER.info(f"{i:>3}{str(f):>20}{n_:>3}{m.np:10.0f}  {t:<45}{str(args):<30}")  # print
@@ -1034,7 +968,6 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         layers.append(m_)
         if i == 0:  # 由于for之前使用ch=[ch]做初始化, 这里做一次重置, 只执行一次
             ch = []
-
         # 添加当前层的输出通道数
         ch.append(c2)
     return nn.Sequential(*layers), sorted(save)
@@ -1149,7 +1082,7 @@ def guess_model_task(model):
 
     # Unable to determine task from model
     LOGGER.warning(
-        "WARNING ⚠️ Unable to automatically guess model task, assuming 'task=detect'. "
-        "Explicitly define task for your model, i.e. 'task=detect', 'segment', 'classify','pose' or 'obb'."
+            "WARNING ⚠️ Unable to automatically guess model task, assuming 'task=detect'. "
+            "Explicitly define task for your model, i.e. 'task=detect', 'segment', 'classify','pose' or 'obb'."
     )
     return "detect"  # assume detect
