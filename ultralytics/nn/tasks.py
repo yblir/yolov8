@@ -9,8 +9,8 @@ import torch.nn as nn
 
 # ----------------------------------------------------------------------------------------------------------------------
 # 以下,都来自gold-yolo
-from .Addmodules.GoldYOLO import Low_FAM, Low_IFM, Split, SimConv, Low_LAF, Inject, RepBlock, High_FAM, High_IFM, \
-    High_LAF
+from .Addmodules.GoldYOLO import (Low_FAM, Low_IFM,  SimConv, Low_LAF, Inject, RepBlock, High_FAM, High_IFM, \
+    High_LAF)
 
 # from .Addmodules.ohter_Gold import IFM, SimFusion_3in, SimFusion_4in, InjectionMultiSum_Auto_pool, PyramidPoolAgg, \
 #     TopBasicLayer, AdvPoolFusion
@@ -934,12 +934,12 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
             args = [c1, c2, global_index]
 
-        elif m is Split:
-            c2 = []
-            for arg in args:
-                if arg != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
-                    c2.append(make_divisible(min(arg, max_channels) * width, 8))
-            args = [c2]
+        # elif m is Split:
+        #     c2 = []
+        #     for arg in args:
+        #         if arg != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
+        #             c2.append(make_divisible(min(arg, max_channels) * width, 8))
+        #     args = [c2]
 
         # todo 检测头魔改添加在这里,不能在上面主干模块中
         elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn, *add_detect}:

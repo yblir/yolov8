@@ -37,31 +37,37 @@ class High_IFM(nn.Module):
     深层特征信息融合
     """
 
+    # 2, 704, 8, 4,[ 1536, 1, 1, 0 ],[ 512, 1024 ], 1, 2, 0, [ 0.1, 2 ] ]
     def __init__(self, block_num, embedding_dim, key_dim, num_heads,
+                 conv_args,
+                 trans_channels,
                  mlp_ratio=4., attn_ratio=2., drop=0.,
                  # attn_drop=0.,未使用的参数,注释掉
                  # todo 原始是drop_path, 但配置文件中用的是drop_path_ratio
                  #  和depths(与模型规格有关,l模型时为3,m时为2)
-                 # drop_path=0.,
-                 drop_path_ratio=0.1, depths=2,
+                 drop_paths=(0.1, 2),
                  norm_cfg=dict(type='BN', requires_grad=True),
                  act_layer=nn.ReLU6):
         super().__init__()
         self.block_num = block_num
-        drop_path = [x.item() for x in torch.linspace(0, drop_path_ratio, depths)]  # 0.1, 2
+        drop_path = [x.item() for x in torch.linspace(0, drop_paths[0], drop_paths[1])]  # 0.1, 2
         self.transformer_blocks = nn.ModuleList()
         for i in range(self.block_num):
             self.transformer_blocks.append(top_Block(
-                    embedding_dim, key_dim=key_dim, num_heads=num_heads,
-                    mlp_ratio=mlp_ratio, attn_ratio=attn_ratio,
-                    drop=drop, drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
-                    norm_cfg=norm_cfg, act_layer=act_layer))
+                embedding_dim, key_dim=key_dim, num_heads=num_heads,
+                mlp_ratio=mlp_ratio, attn_ratio=attn_ratio,
+                drop=drop, drop_path=drop_path[i] if isinstance(drop_path, list) else drop_path,
+                norm_cfg=norm_cfg, act_layer=act_layer))
+        self.trans_conv = nn.Conv2d(*conv_args)
+        self.trans_channels = trans_channels
 
     def forward(self, x):
         # token * N
         for i in range(self.block_num):
             x = self.transformer_blocks[i](x)
-        return x
+
+        x = self.trans_conv(x)
+        return x.split(self.trans_channels, dim=1)
 
 
 class Mlp(nn.Module):
@@ -159,7 +165,7 @@ class Attention(torch.nn.Module):
         self.to_v = Conv2d_BN(dim, self.dh, 1, norm_cfg=norm_cfg)
 
         self.proj = torch.nn.Sequential(activation(), Conv2d_BN(
-                self.dh, dim, bn_weight_init=0, norm_cfg=norm_cfg))
+            self.dh, dim, bn_weight_init=0, norm_cfg=norm_cfg))
 
     def forward(self, x):  # x (B,N,C)
         B, C, H, W = get_shape(x)
@@ -199,7 +205,7 @@ class Conv2d_BN(nn.Sequential):
         self.groups = groups
 
         self.add_module('c', nn.Conv2d(
-                a, b, ks, stride, pad, dilation, groups, bias=False))
+            a, b, ks, stride, pad, dilation, groups, bias=False))
         bn = build_norm_layer(norm_cfg, b)[1]
         nn.init.constant_(bn.weight, bn_weight_init)
         nn.init.constant_(bn.bias, 0)
@@ -286,7 +292,7 @@ class RepVGGBlock(nn.Module):
 
         else:
             self.rbr_identity = nn.BatchNorm2d(
-                    num_features=in_channels) if out_channels == in_channels and stride == 1 else None
+                num_features=in_channels) if out_channels == in_channels and stride == 1 else None
             self.rbr_dense = conv_bn(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
                                      stride=stride, padding=padding, groups=groups)
             self.rbr_1x1 = conv_bn(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride,
@@ -404,6 +410,7 @@ class Inject(nn.Module):
             oup: int,
             # 源码中没有index参数. 从split获得两个tensor, 这里要指定用哪个,用第一个,全局的
             global_index: int,
+            rep_block_nums=1,
             norm_cfg=dict(type='BN', requires_grad=True),
             # activations=None, 未使用, 注释掉
             global_inp=None,
@@ -419,6 +426,8 @@ class Inject(nn.Module):
         self.global_embedding = ConvModule(global_inp, oup, kernel_size=1, norm_cfg=self.norm_cfg, act_cfg=None)
         self.global_act = ConvModule(global_inp, oup, kernel_size=1, norm_cfg=self.norm_cfg, act_cfg=None)
         self.act = h_sigmoid()
+        # 将整合注入结果的模块写在Inject模块中
+        self.rep_block = RepBlock(oup, oup, rep_block_nums)
 
     def forward(self, x):
         '''
@@ -448,6 +457,9 @@ class Inject(nn.Module):
             global_feat = F.interpolate(global_feat, size=(H, W), mode='bilinear', align_corners=False)
 
         out = local_feat * sig_act + global_feat
+        # 不该变通道数
+        out = self.rep_block(out)
+
         return out
 
 
@@ -512,13 +524,13 @@ class SimConv(nn.Module):
         if padding is None:
             padding = kernel_size // 2
         self.conv = nn.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
-                groups=groups,
-                bias=bias,
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=groups,
+            bias=bias,
         )
         self.bn = nn.BatchNorm2d(out_channels)
         self.act = nn.ReLU()
@@ -555,8 +567,8 @@ class Low_IFM(nn.Module):
         super().__init__()
         self.conv1 = Conv(in_channels, embed_dims, kernel_size=1, stride=1, padding=0)
         self.block = nn.ModuleList(
-                [RepVGGBlock(embed_dims, embed_dims) for _ in
-                 range(fuse_block_num)]) if fuse_block_num > 0 else nn.Identity
+            [RepVGGBlock(embed_dims, embed_dims) for _ in
+             range(fuse_block_num)]) if fuse_block_num > 0 else nn.Identity
         self.conv2 = Conv(embed_dims, out_channels, kernel_size=1, stride=1, padding=0)
         self.trans_channels = trans_channels
 
@@ -619,13 +631,13 @@ class Conv(nn.Module):
         if padding is None:
             padding = kernel_size // 2
         self.conv = nn.Conv2d(
-                in_channels,
-                out_channels,
-                kernel_size=kernel_size,
-                stride=stride,
-                padding=padding,
-                groups=groups,
-                bias=bias,
+            in_channels,
+            out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=groups,
+            bias=bias,
         )
         self.bn = nn.BatchNorm2d(out_channels)
         self.act = nn.SiLU()
