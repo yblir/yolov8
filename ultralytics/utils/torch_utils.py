@@ -310,7 +310,8 @@ def get_flops(model, imgsz=640):
             imgsz = [imgsz, imgsz]  # expand if int/float
         try:
             # Use stride size for input tensor
-            stride = max(int(model.stride.max()), 32) if hasattr(model, "stride") else 32  # max stride
+            # stride = max(int(model.stride.max()), 32) if hasattr(model, "stride") else 32  # max stride
+            stride=640
             im = torch.empty((1, p.shape[1], stride, stride), device=p.device)  # input image in BCHW format
             flops = thop.profile(deepcopy(model), inputs=[im], verbose=False)[0] / 1e9 * 2  # stride GFLOPs
             return flops * imgsz[0] / stride * imgsz[1] / stride  # imgsz GFLOPs

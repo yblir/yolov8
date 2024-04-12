@@ -9,8 +9,8 @@ import torch.nn as nn
 
 # ----------------------------------------------------------------------------------------------------------------------
 # 以下,都来自gold-yolo
-from .Addmodules.GoldYOLO import (Low_FAM, Low_IFM,  SimConv, Low_LAF, Inject, RepBlock, High_FAM, High_IFM, \
-    High_LAF)
+from .Addmodules.GoldYOLO import (Low_FAM, Low_IFM, SimConv, Low_LAF, Split, Inject, RepBlock, High_FAM, High_IFM, \
+                                  High_LAF)
 
 # from .Addmodules.ohter_Gold import IFM, SimFusion_3in, SimFusion_4in, InjectionMultiSum_Auto_pool, PyramidPoolAgg, \
 #     TopBasicLayer, AdvPoolFusion
@@ -151,9 +151,6 @@ class BaseModel(nn.Module):
             if profile:
                 self._profile_one_layer(m, x, dt)
 
-            # todo gold-yolo, 这里要修改
-
-            # x = m(*x) if m.input_nums > 1 else m(x)
             x = m(x)
             # 根据self.save列表保存模型输出
             y.append(x if m.i in self.save else None)  # save output
@@ -324,7 +321,8 @@ class DetectionModel(BaseModel):
         m = self.model[-1]  # Detect()
         # todo
         if isinstance(m, (Detect, *add_detect)):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect
-            s = 256  # 2x min stride
+            # s = 256  # 2x min stride
+            s=640
             m.inplace = self.inplace
             forward = lambda x: self.forward(x)[0] if isinstance(m, (Segment, Pose, OBB)) else self.forward(x)
             m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
@@ -890,7 +888,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                  nn.Conv2d  # 专为gold设计?
                  }:
             # c1:输入通道输,从上一级输出或指定层获得
-            # todo c1改为可以接受list, 拿到参数后自定义模块自行处理参数
+            # todo c1改为可以接受list, 拿到参数后自定义模块自行处理参数,如Low_LAF接受的就是列表
             c1, c2 = ([ch[index] for index in f], args[0]) if isinstance(f, list) else (ch[f], args[0])
 
             # 以下, 再对不能统一处理的模块进行单独处理
@@ -926,21 +924,23 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         elif m in {Concat, *add_concat}:
             # 类的init没有参数, 主要用于FPN层, 输出通道数之和
             c2 = sum(ch[x] for x in f)
+        # --------------GOLD-YOLO---------------------------------------------------------------------------------------
+        # gold中需要单独处理的模块
+        # todo 起初想把Split模块写入xxx_IFM模块中,发现对分别注入inject的子模块很难处理,还是要单独列为一层
+        elif m is Split:
+            c2 = []
+            for arg in args:
+                if arg != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
+                    c2.append(make_divisible(min(arg, max_channels) * width, 8))
+            args = [c2]
         elif m is Inject:
             # 从split拿结果
             global_index = args[1]
             c1, c2 = ch[f[1]][global_index], args[0]
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
-            args = [c1, c2, global_index]
-
-        # elif m is Split:
-        #     c2 = []
-        #     for arg in args:
-        #         if arg != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
-        #             c2.append(make_divisible(min(arg, max_channels) * width, 8))
-        #     args = [c2]
-
+            args = [c1, c2, *args[1:]]
+        # --------------GOLD-YOLO---------------------------------------------------------------------------------------
         # todo 检测头魔改添加在这里,不能在上面主干模块中
         elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn, *add_detect}:
             # 此时f是输出层索引, list
@@ -956,6 +956,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             c2 = ch[f[-1]]
         else:
             c2 = ch[f]
+
+        if m is SimConv:
+            pass
 
         m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace("__main__.", "")  # module type
