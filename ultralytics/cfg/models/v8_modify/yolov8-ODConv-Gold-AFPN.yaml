@@ -6,10 +6,10 @@ nc: 80  # number of classes
 scales: # model compound scaling constants, i.e. 'model=yolov8n.yaml' will call yolov8.yaml with scale 'n'
   # [depth, width, max_channels]
   n: [ 0.33, 0.25, 2048 ]  # YOLOv8n summary: 225 layers,  3157200 parameters,  3157184 gradients,   8.9 GFLOPs
-  s: [ 0.33, 0.50, 1024 ]  # YOLOv8s summary: 225 layers, 11166560 parameters, 11166544 gradients,  28.8 GFLOPs
-  m: [ 0.67, 0.75, 1024 ]   # YOLOv8m summary: 295 layers, 25902640 parameters, 25902624 gradients,  79.3 GFLOPs
-  l: [ 1.00, 1.00, 512 ]   # YOLOv8l summary: 365 layers, 43691520 parameters, 43691504 gradients, 165.7 GFLOPs
-  x: [ 1.00, 1.25, 512 ]   # YOLOv8x summary: 365 layers, 68229648 parameters, 68229632 gradients, 258.5 GFLOPs
+  s: [ 0.33, 0.50, 2048 ]  # YOLOv8s summary: 225 layers, 11166560 parameters, 11166544 gradients,  28.8 GFLOPs
+  m: [ 0.67, 0.75, 2048 ]   # YOLOv8m summary: 295 layers, 25902640 parameters, 25902624 gradients,  79.3 GFLOPs
+  l: [ 1.00, 1.00, 2048 ]   # YOLOv8l summary: 365 layers, 43691520 parameters, 43691504 gradients, 165.7 GFLOPs
+  x: [ 1.00, 1.25, 2048 ]   # YOLOv8x summary: 365 layers, 68229648 parameters, 68229632 gradients, 258.5 GFLOPs
 
 # YOLOv8.0n backbone
 backbone:
@@ -64,7 +64,12 @@ head:
   # High_IFM的输出通道数不能适配上下两个注入层,需要加卷积调节通道数,High_IFM不改变通道数,因此卷积参数为:
   # todo 这层卷积不受width影响,要手动计算输入=1792*0.25=448, 输出=(1024+512)*0.25=384
   # todo s:896,768, m: 1344, 1152, 根据backbone scales,计算对应的值填入
-  - [ -1, 1, High_IFM, [ 2, 896, 8, 4,[ 896,768, 1, 1, 0 ], 1, 2, 0, [ 0.1, 2 ] ] ] # 20
+  #  - [ -1, 1, High_IFM, [ 2, 896, 8, 4,[ 896,768, 1, 1, 0 ], 1, 2, 0, [ 0.1, 2 ] ] ] # 20
+
+  # 256+512+1024=1792, 512+1024=1536, 这两个通道最终受width影响,不同scale的模型自动调整
+  # 1536是该模块最终输出，再由split分成两个全局特征。1792是High_FAM的输出通道,理论上可从上一级模块获得，但这里显式
+  # 传入，因为需要提前初始化多头注意力
+  - [ -1, 1, High_IFM, [ 1536, 2, 8, 4, 1, 2, 0, [ 0.1, 2 ] ] ] # 20
   # 受width影响,对齐原始通道即可.
   - [ -1, 1, Split, [ 512, 1024 ] ] # 21-high_global_info
   # ----------------------------------------------------------------------------------------------

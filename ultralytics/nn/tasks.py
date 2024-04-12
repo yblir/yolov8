@@ -20,10 +20,10 @@ add_conv = [ODConv2dYolo, ]
 # 对C1,C3,C2f这样的模块封装,主要添加在模块重复区域, 输入输出+其他参数
 add_block = [C2f_ODConv, CSPStage, C2f_DLKA, ASCPA,
              # gold-yolo
-             Low_IFM, Low_LAF, SimConv, RepBlock,
+             Low_IFM, Low_LAF, SimConv, RepBlock, High_IFM
              ]
 # 禁止插入重复次数的参数, 如gold的各个模块
-forbid_insert = [Low_IFM, Low_LAF, SimConv]
+forbid_insert = [Low_IFM, Low_LAF, SimConv, High_IFM]
 # 与concat类似,初始化不需要参数, forward接受tensor然后通道维度合并在一起
 add_concat = [Low_FAM, High_FAM, High_LAF]
 # 最后的检测头魔改
@@ -152,6 +152,7 @@ class BaseModel(nn.Module):
                 self._profile_one_layer(m, x, dt)
 
             x = m(x)
+
             # 根据self.save列表保存模型输出
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
@@ -165,8 +166,8 @@ class BaseModel(nn.Module):
     def _predict_augment(self, x):
         """Perform augmentations on input image x and return augmented inference."""
         LOGGER.warning(
-                f"WARNING ⚠️ {self.__class__.__name__} does not support augmented inference yet. "
-                f"Reverting to single-scale inference instead."
+            f"WARNING ⚠️ {self.__class__.__name__} does not support augmented inference yet. "
+            f"Reverting to single-scale inference instead."
         )
         return self._predict_once(x)
 
@@ -322,7 +323,7 @@ class DetectionModel(BaseModel):
         # todo
         if isinstance(m, (Detect, *add_detect)):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect
             # s = 256  # 2x min stride
-            s=640
+            s = 640
             m.inplace = self.inplace
             forward = lambda x: self.forward(x)[0] if isinstance(m, (Segment, Pose, OBB)) else self.forward(x)
             m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
@@ -527,8 +528,8 @@ class RTDETRDetectionModel(DetectionModel):
         batch_idx = batch["batch_idx"]
         gt_groups = [(batch_idx == i).sum().item() for i in range(bs)]
         targets = {
-            "cls"      : batch["cls"].to(img.device, dtype=torch.long).view(-1),
-            "bboxes"   : batch["bboxes"].to(device=img.device),
+            "cls": batch["cls"].to(img.device, dtype=torch.long).view(-1),
+            "bboxes": batch["bboxes"].to(device=img.device),
             "batch_idx": batch_idx.to(img.device, dtype=torch.long).view(-1),
             "gt_groups": gt_groups,
         }
@@ -545,11 +546,11 @@ class RTDETRDetectionModel(DetectionModel):
         dec_scores = torch.cat([enc_scores.unsqueeze(0), dec_scores])
 
         loss = self.criterion(
-                (dec_bboxes, dec_scores), targets, dn_bboxes=dn_bboxes, dn_scores=dn_scores, dn_meta=dn_meta
+            (dec_bboxes, dec_scores), targets, dn_bboxes=dn_bboxes, dn_scores=dn_scores, dn_meta=dn_meta
         )
         # NOTE: There are like 12 losses in RTDETR, backward with all losses but only show the main three losses.
         return sum(loss.values()), torch.as_tensor(
-                [loss[k].detach() for k in ["loss_giou", "loss_class", "loss_bbox"]], device=img.device
+            [loss[k].detach() for k in ["loss_giou", "loss_class", "loss_bbox"]], device=img.device
         )
 
     def predict(self, x, profile=False, visualize=False, batch=None, augment=False, embed=None):
@@ -740,8 +741,8 @@ def torch_safe_load(weight):
         with temporary_modules(
                 {
                     "ultralytics.yolo.utils": "ultralytics.utils",
-                    "ultralytics.yolo.v8"   : "ultralytics.models.yolo",
-                    "ultralytics.yolo.data" : "ultralytics.data",
+                    "ultralytics.yolo.v8": "ultralytics.models.yolo",
+                    "ultralytics.yolo.data": "ultralytics.data",
                 }
         ):  # for legacy 8.0 Classify and Pose models
             ckpt = torch.load(file, map_location="cpu")
@@ -749,19 +750,19 @@ def torch_safe_load(weight):
     except ModuleNotFoundError as e:  # e.name is missing module name
         if e.name == "models":
             raise TypeError(
-                    emojis(
-                            f"ERROR ❌️ {weight} appears to be an Ultralytics YOLOv5 model originally trained "
-                            f"with https://github.com/ultralytics/yolov5.\nThis model is NOT forwards compatible with "
-                            f"YOLOv8 at https://github.com/ultralytics/ultralytics."
-                            f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
-                            f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'"
-                    )
+                emojis(
+                    f"ERROR ❌️ {weight} appears to be an Ultralytics YOLOv5 model originally trained "
+                    f"with https://github.com/ultralytics/yolov5.\nThis model is NOT forwards compatible with "
+                    f"YOLOv8 at https://github.com/ultralytics/ultralytics."
+                    f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
+                    f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'"
+                )
             ) from e
         LOGGER.warning(
-                f"WARNING ⚠️ {weight} appears to require '{e.name}', which is not in ultralytics requirements."
-                f"\nAutoInstall will run now for '{e.name}' but this feature will be removed in the future."
-                f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
-                f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'"
+            f"WARNING ⚠️ {weight} appears to require '{e.name}', which is not in ultralytics requirements."
+            f"\nAutoInstall will run now for '{e.name}' but this feature will be removed in the future."
+            f"\nRecommend fixes are to train a new model using the latest 'ultralytics' package or to "
+            f"run a command with an official YOLOv8 model, i.e. 'yolo predict model=yolov8n.pt'"
         )
         check_requirements(e.name)  # install missing module
         ckpt = torch.load(file, map_location="cpu")
@@ -769,8 +770,8 @@ def torch_safe_load(weight):
     if not isinstance(ckpt, dict):
         # File is likely a YOLO instance saved with i.e. torch.save(model, "saved_model.pt")
         LOGGER.warning(
-                f"WARNING ⚠️ The file '{weight}' appears to be improperly saved or formatted. "
-                f"For optimal results, use model.save('filename.pt') to correctly save YOLO models."
+            f"WARNING ⚠️ The file '{weight}' appears to be improperly saved or formatted. "
+            f"For optimal results, use model.save('filename.pt') to correctly save YOLO models."
         )
         ckpt = {"model": ckpt.model}
 
@@ -867,8 +868,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
     ch = [ch]
     # layer存储每层解析出的模块, save存储当前层索引, c2存储每层输出通道
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-    backbone = False
-    goldyolo = False
+
     # (f, n, m, args)->(from,repeats,module,args)
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
         # 如果模块以nn开头,直接使用torch自带的模块,否则使用yaml指定的模块
@@ -887,6 +887,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                  *add_conv, *add_block,
                  nn.Conv2d  # 专为gold设计?
                  }:
+
             # c1:输入通道输,从上一级输出或指定层获得
             # todo c1改为可以接受list, 拿到参数后自定义模块自行处理参数,如Low_LAF接受的就是列表
             c1, c2 = ([ch[index] for index in f], args[0]) if isinstance(f, list) else (ch[f], args[0])
@@ -898,7 +899,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             if m is C2fAttn:
                 args[1] = make_divisible(min(args[1], max_channels // 2) * width, 8)  # embed channels
                 args[2] = int(
-                        max(round(min(args[2], max_channels // 2 // 32)) * width, 1) if args[2] > 1 else args[2]
+                    max(round(min(args[2], max_channels // 2 // 32)) * width, 1) if args[2] > 1 else args[2]
                 )  # num heads
 
             args = [c1, c2, *args[1:]]
@@ -956,9 +957,6 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             c2 = ch[f[-1]]
         else:
             c2 = ch[f]
-
-        if m is SimConv:
-            pass
 
         m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace("__main__.", "")  # module type
@@ -1085,7 +1083,7 @@ def guess_model_task(model):
 
     # Unable to determine task from model
     LOGGER.warning(
-            "WARNING ⚠️ Unable to automatically guess model task, assuming 'task=detect'. "
-            "Explicitly define task for your model, i.e. 'task=detect', 'segment', 'classify','pose' or 'obb'."
+        "WARNING ⚠️ Unable to automatically guess model task, assuming 'task=detect'. "
+        "Explicitly define task for your model, i.e. 'task=detect', 'segment', 'classify','pose' or 'obb'."
     )
     return "detect"  # assume detect

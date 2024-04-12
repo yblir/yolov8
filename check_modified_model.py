@@ -44,7 +44,7 @@ def model_forward(CFG):
     model = YOLO(CFG, verbose=True)
     # print(model)
     # model(source=SOURCE)  # also test no source and augment
-    model.predict(r"E:\GitHub\yolov8\ultralytics\assets\bus.jpg")
+    # model.predict(r"E:\GitHub\yolov8\ultralytics\assets\bus.jpg")
 
 
 if __name__ == '__main__':
@@ -52,6 +52,6 @@ if __name__ == '__main__':
     # yaml_path = 'ultralytics/cfg/models/v8_modify/yolov8-AKConv.yaml'
     # yaml_path= 'ultralytics/cfg/models/v8_modify/yolov8s_lyb.yaml'
     yaml_path = "ultralytics/cfg/models/v8_modify/yolov8s-ODConv-Gold-AFPN.yaml"
-    # yaml_path=r"E:\GitHub\yolov8\ultralytics\cfg\models\v8_modify\yolov8s.yaml"
+    # yaml_path=r"E:\GitHub\yolov8\ultralytics\cfg\models\v8\yolov8.yaml"
     # yaml_path='ultralytics/cfg/models/v8_modify/yolov8s_4fpn.yaml'
     model_forward(yaml_path)
