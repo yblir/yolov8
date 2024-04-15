@@ -12,11 +12,11 @@ from sahi.predict import get_sliced_prediction
 from sahi.utils.yolov8 import download_yolov8s_model
 
 if __name__ == '__main__':
-    model = YOLO('yolov8n.pt')  # select your model.pt path
+    model = YOLO('weights/yolov8n.pt')  # select your model.pt path
     # a=model.export(format='engine')
     img = cv2.imread("ultralytics/assets/bus.jpg")
     detection_model = AutoDetectionModel.from_pretrained(
-            model_type="yolov8", model_path="yolov8n.pt", confidence_threshold=0.5, device="gpu"
+            model_type="yolov8", model_path="weights/yolov8n.pt", confidence_threshold=0.5, device="gpu"
     )
     results = get_sliced_prediction(
             img, detection_model, slice_height=256, slice_width=256, overlap_height_ratio=0.2, overlap_width_ratio=0.2

@@ -87,7 +87,7 @@ from ultralytics import YOLO
 
 # 加载模型
 model = YOLO("yolov8n.yaml")  # 从头开始构建新模型
-model = YOLO("yolov8n.pt")  # 加载预训练模型（建议用于训练）
+model = YOLO("weights/yolov8n.pt")  # 加载预训练模型（建议用于训练）
 
 # 使用模型
 model.train(data="coco128.yaml", epochs=3)  # 训练模型

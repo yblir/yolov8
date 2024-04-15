@@ -12,7 +12,7 @@ from sahi.predict import get_sliced_prediction
 from sahi.utils.yolov8 import download_yolov8s_model
 
 if __name__ == '__main__':
-    model = YOLO('yolov8n.pt')  # select your model.pt path
+    model = YOLO('weights/yolov8n.pt')  # select your model.pt path
     # a=model.export(format='engine')
 
     img = cv2.imread("ultralytics/assets/bus.jpg")
